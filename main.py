@@ -1,4 +1,6 @@
 from fastapi import FastAPI,status,Depends,HTTPException
+from fastapi.responses import JSONResponse
+from fastapi.requests import Request
 import models
 from database import engine, SessionLocal
 from typing import Annotated
@@ -10,6 +12,15 @@ from auth import get_current_user
 app = FastAPI()
 app.include_router(auth.router)
 
+@app.middleware("http")
+async def catch_exceptions_middleware(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Internal Server Error", "error": str(e)},
+        )
 
 models.Base.metadata.create_all(bind=engine)
 

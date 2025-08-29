@@ -3,12 +3,13 @@ from typing import Annotated
 from fastapi import APIRouter,Depends,HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
 from starlette import status
 from database import SessionLocal
 from models import Users
 from passlib.context import CryptContext
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from jose import JWTError, jwt
+from jose import JWTError, jwt, ExpiredSignatureError
 
 router = APIRouter(
     prefix="/auth",
@@ -40,10 +41,28 @@ db_dependency = Annotated[Session, Depends(get_db)]
 
 @router.post("/", status_code=status.HTTP_201_CREATED)
 async def create_user(create_user: CreateUserRequest, db: db_dependency):
-    create_user=Users(username=create_user.username, hashed_password=pwd_context.hash(create_user.password))
-    
-    db.add(create_user)
-    db.commit()
+    existing_user = db.query(Users).filter(Users.username == create_user.username).first()
+    if existing_user:
+        raise HTTPException(
+            status_code=409,  # 409 Conflict
+            detail="Username already taken"
+        )
+
+    try:
+        new_user = Users(
+            username=create_user.username,
+            hashed_password=pwd_context.hash(create_user.password)
+        )
+
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+    except SQLAlchemyError as e:
+        db.rollback()  # make sure DB isn’t left in a broken state
+        raise HTTPException(status_code=500, detail="Database error: " + str(e))
+
+    return {"message": "User created successfully", "username": new_user.username}
+
 
 @router.post("/token", response_model=Token)
 async def login_for_access_token(form_data: Annotated[OAuth2PasswordRequestForm, Depends()], db: db_dependency):
@@ -81,6 +100,10 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
                 detail="Could not validate credentials",
             )
         return {"username": username, "id": user_id}
+    
+    except ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    
     except JWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
