@@ -24,10 +24,23 @@ db_dependency = Annotated[Session, Depends(get_db)]
 user_dependency = Annotated[dict, Depends(get_current_user)]
 
 @app.get("/", status_code=status.HTTP_200_OK)
+async def read_root():
+    return {"message": "Welcome to the FastAPI application!"}
+
+@app.get("/users", status_code=status.HTTP_200_OK)
 async def verify_user_exists(user: user_dependency, db: db_dependency):
     if user is None:
         raise HTTPException(status_code=401, detail="Authentication failed")
     return {"User":user}
+
+@app.get("/users/{user_id}", status_code=status.HTTP_200_OK)
+async def get_user_by_id(user_id: int, user: user_dependency, db: db_dependency):
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication failed")
+    db_user = db.query(models.Users).filter(models.Users.id == user_id).first()
+    if db_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"id": db_user.id, "username": db_user.username}
 
 @app.get("/health", status_code=status.HTTP_200_OK)
 async def health_check():
