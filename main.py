@@ -1,34 +1,46 @@
-from fastapi import FastAPI,status,Depends,HTTPException
-import models
-from database import engine, SessionLocal
-from typing import Annotated
-from sqlalchemy.orm import Session
-import auth
-from auth import get_current_user
-
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 
 app = FastAPI()
-app.include_router(auth.router)
 
+class Item(BaseModel):
+    text: str
+    is_done: bool=False
 
-models.Base.metadata.create_all(bind=engine)
+items = []
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+@app.get("/")
+def root():
+    return {"status": "ok", "message": "FastAPI is running"}
 
-db_dependency = Annotated[Session, Depends(get_db)]
-user_dependency = Annotated[dict, Depends(get_current_user)]
+@app.get("/health")
+def health_check():
+    return {"status": "healthy"}
 
-@app.get("/", status_code=status.HTTP_200_OK)
-async def verify_user_exists(user: user_dependency, db: db_dependency):
-    if user is None:
-        raise HTTPException(status_code=401, detail="Authentication failed")
-    return {"User":user}
+@app.post("/items")
+def create_item(item: Item):
+    items.append(item)
+    return items
 
-@app.get("/health", status_code=status.HTTP_200_OK)
-async def health_check():
-    return {"status":"ok"}
+@app.get("/items", response_model=list[Item])
+def list_items(limit: int = 10):
+    return items[0:limit]
+
+@app.get("/items/{item_id}", response_model=Item)
+def get_item(item_id: int) -> Item:
+    if item_id < 0 or item_id >= len(items):
+        raise HTTPException(status_code=404, detail=f"Item {item_id} not found")
+    return items[item_id]
+
+@app.put("/items/{item_id}", response_model=Item)
+def update_item(item_id: int, item: Item) -> Item:  
+    if item_id < 0 or item_id >= len(items):
+        raise HTTPException(status_code=404, detail=f"Item {item_id} not found")
+    items[item_id] = item
+    return item
+
+@app.delete("/items/{item_id}", response_model=Item)
+def delete_item(item_id: int) -> Item:
+    if item_id < 0 or item_id >= len(items):
+        raise HTTPException(status_code=404, detail=f"Item {item_id} not found")
+    return items.pop(item_id)
