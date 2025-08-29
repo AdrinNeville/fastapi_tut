@@ -5,12 +5,12 @@ import models
 from database import engine, SessionLocal
 from typing import Annotated
 from sqlalchemy.orm import Session
-import auth
-from auth import get_current_user
+import authentication
+from authentication import get_current_user
 
 
 app = FastAPI()
-app.include_router(auth.router)
+app.include_router(authentication.router)
 
 @app.middleware("http")
 async def catch_exceptions_middleware(request: Request, call_next):
