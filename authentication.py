@@ -1,12 +1,12 @@
 from datetime import datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Optional
 from fastapi import APIRouter,Depends,HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from starlette import status
 from database import SessionLocal
-from models import Users
+from models import Users, RoleEnum
 from passlib.context import CryptContext
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt, ExpiredSignatureError
@@ -25,6 +25,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
 class CreateUserRequest(BaseModel):
     username: str
     password: str
+    role: Optional[RoleEnum] = RoleEnum.USER
 
 class Token(BaseModel):
     access_token: str
@@ -51,22 +52,26 @@ async def create_user(create_user: CreateUserRequest, db: db_dependency):
     try:
         new_user = Users(
             username=create_user.username,
-            hashed_password=pwd_context.hash(create_user.password)
+            hashed_password=pwd_context.hash(create_user.password),
+            role=create_user.role
         )
 
         db.add(new_user)
         db.commit()
         db.refresh(new_user)
     except SQLAlchemyError as e:
-        db.rollback()  # make sure DB isn’t left in a broken state
+        db.rollback()  # make sure DB isn't left in a broken state
         raise HTTPException(status_code=500, detail="Database error: " + str(e))
 
-    return {"message": "User created successfully", "username": new_user.username}
-
+    return {
+        "message": "User created successfully", 
+        "username": new_user.username,
+        "role": new_user.role.value
+    }
 
 @router.post("/token", response_model=Token)
 async def login_for_access_token(form_data: Annotated[OAuth2PasswordRequestForm, Depends()], db: db_dependency):
-    user =authenticate_user(form_data.username, form_data.password,db)
+    user = authenticate_user(form_data.username, form_data.password, db)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -74,9 +79,8 @@ async def login_for_access_token(form_data: Annotated[OAuth2PasswordRequestForm,
     token = create_access_token(username=user.username, user_id=user.id, expires_delta=timedelta(minutes=20))
     return {"access_token": token, "token_type": "bearer"}
 
-
 def authenticate_user(username: str, password: str, db):
-    user=db.query(Users).filter(Users.username == username).first()
+    user = db.query(Users).filter(Users.username == username).first()
     if not user:
         return False
     if not pwd_context.verify(password, user.hashed_password):
