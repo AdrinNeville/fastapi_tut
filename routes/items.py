@@ -1,29 +1,39 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+import models
+from database import SessionLocal
 
 router = APIRouter(
     prefix="/items",
     tags=["items"]
 )
 
-# Fake in-memory "database"
-items_db = []
-next_id = 1
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 @router.post("/")
-async def create_item(name: str):
-    global next_id
-    item = {"id": next_id, "name": name}
-    items_db.append(item)
-    next_id += 1
-    return {"message": f"Item '{name}' created", "item": item}
+def create_item(name: str, owner_id: int, db: Session = Depends(get_db)):
+    # check if user exists
+    owner = db.query(models.User).filter(models.User.id == owner_id).first()
+    if not owner:
+        raise HTTPException(status_code=400, detail="Owner does not exist")
+    item = models.Item(name=name, owner_id=owner_id)
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
 
 @router.get("/")
-async def get_items():
-    return {"items": items_db}
+def get_items(db: Session = Depends(get_db)):
+    return db.query(models.Item).all()
 
 @router.get("/{item_id}")
-async def get_item(item_id: int):
-    for item in items_db:
-        if item["id"] == item_id:
-            return item
-    return {"error": "Item not found"}
+def get_item(item_id: int, db: Session = Depends(get_db)):
+    item = db.query(models.Item).filter(models.Item.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return item
